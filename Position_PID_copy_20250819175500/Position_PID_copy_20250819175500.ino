@@ -98,7 +98,8 @@ PID_control ctrl(kpa, kia, kda, 0, 170, sigma, dt/1e6);
 PID_control ctrlb(kpb, kib, kdb, 0, 170, sigma, dt/1e6);
 
 //LARGE control constants
-double Kp=2; 
+double Kp=0;
+//.1; 
 double Ki=0;
 double Kd=0;
 
@@ -212,7 +213,7 @@ void loop() {
   //Serial.print("SPI read: ");
   //Serial.println(angle);
   //Serial.print("    deg: ");
-  Serial.println(angleDeg);
+  //Serial.println(angleDeg);
   //Serial.println(angleBound);
   //Serial.print("A/B: ");
   //Serial.println(outputAngle);
@@ -228,8 +229,8 @@ void loop() {
   //Serial.print(" ");
   //Serial.print(count2);
   //Serial.print(" ");
-  Serial.print(angleDeg);
-  Serial.println("\t");
+  //Serial.print(angleDeg);
+  //Serial.println("\t");
   //Serial.println(angleBound);
   //Serial.print(" ");
   //Serial.println(outputAngle);
@@ -306,18 +307,18 @@ void loop() {
           
 
           
-          setMotor(pwra,dir,pwrb,dir);
-          //setMotor(40,1,40,1);
+          //setMotor(pwra,dir,pwrb,dir);
+          setMotor(40,dir,40,dir);
 
           prev=cur; //update sampling time chunk
           //for plotter
-          //Serial.print(deltatime);
-          //Serial.print(",");
-          //Serial.print(angleDeg);
-          //Serial.print(",");
-          //Serial.print(outputAngle);
-          //Serial.print(",");
-          //Serial.print(encoderDifference);
+          Serial.print(deltatime);
+          Serial.print(",");
+          Serial.print(angleDeg);
+          Serial.print(",");
+          Serial.print(outputAngle);
+          Serial.print(",");
+          Serial.println(encoderDifference);
 
 
         }
@@ -337,7 +338,7 @@ void loop() {
     }
   }
 
-  delay(50);  // slight delay for readability
+  //delay(50);  // slight delay for readability
 }
 
 float PID(float setpoint, float input){ 
