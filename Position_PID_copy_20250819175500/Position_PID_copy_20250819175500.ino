@@ -97,10 +97,10 @@ double kdb=0;
 PID_control ctrl(kpa, kia, kda, 0, 170, sigma, dt/1e6);
 PID_control ctrlb(kpb, kib, kdb, 0, 170, sigma, dt/1e6);
 
-//VELOCITY control constants
-double Kp=2;
-double Ki=5;
-double Kd=1;
+//LARGE control constants
+double Kp=2; 
+double Ki=0;
+double Kd=0;
 
 float totalError=0;
 float previousError=0;
@@ -122,7 +122,7 @@ void setup() {
   //  ctrlb.antiWindupEnabled = true;
   Serial.begin(115200);
   //while (!Serial)
-    //;  //wait for USB serial connection
+    //wait for USB serial connection
 
   //motors
   pinMode(AIN1, OUTPUT);
@@ -193,37 +193,49 @@ void loop() {
   // SPI encoder angle
   uint16_t angle = as5047p.readAngleRaw();
   float angleDeg = angle * 360.0 / 16384.0;
+  float angleBound=angleDeg-180;
+
 
   //Quadrature built in encoder
-  inputAngle = 360.0 * count / CPR;
+  inputAngle = 360.0 * (count) / CPR;
   outputAngle = inputAngle / N;
   outputAngle = fmod(outputAngle, 360.0);
 
-  inputAngle2 = 360.0 * count2 / CPR;
+  inputAngle2 = 360.0 * (count2) / CPR;
   outputAngle2 = inputAngle2 / N;
   outputAngle2 = fmod(outputAngle2, 360.0);
 
-/*//for graph
-  Serial.print("SPI read: ");
-  Serial.println(angle);
-  Serial.print("    deg: ");
-  Serial.print(angleDeg);
-  Serial.print("Left: ");
-  Serial.println(outputAngle);
-  Serial.print("Right: ");
-  Serial.println(outputAngle2);
-  */
+  float encoderDifference=angleDeg-outputAngle;
 
-  //for plotter
+
+//for print
+  //Serial.print("SPI read: ");
+  //Serial.println(angle);
+  //Serial.print("    deg: ");
+  Serial.println(angleDeg);
+  //Serial.println(angleBound);
+  //Serial.print("A/B: ");
+  //Serial.println(outputAngle);
+  //Serial.print("difference:");
+  //Serial.println(encoder_difference);
+  //Serial.println(" ");
+  //Serial.print("Right: ");
+  //Serial.println(outputAngle2);
+  
+
+  //for serial monitor
   //Serial.print(count);
   //Serial.print(" ");
   //Serial.print(count2);
   //Serial.print(" ");
   Serial.print(angleDeg);
-  Serial.print(" ");
-  Serial.print(outputAngle);
-  Serial.print(" ");
-  Serial.println(outputAngle2);
+  Serial.println("\t");
+  //Serial.println(angleBound);
+  //Serial.print(" ");
+  //Serial.println(outputAngle);
+  //Serial.print(" ");
+  //Serial.println(outputAngle2);
+  //delay(10);
 
   if (buttonTriggered) {
     deltatime = millis() - startTime; //time elapsed since start
@@ -268,11 +280,11 @@ void loop() {
           int dir;
           int pwra;
           positionControl = true;
-          float refAngle= 180;
+          float refAngle= 0;
           //sin(2*3.14159265359*frequency*(deltatime/1000)); //reference position setpoint for both motors
           //Serial.print("DATA HIT THIS POINT INSIDE THE LOOP");
           //angular position control that outputs a desired velocity for inner loop to match
-          float u_pos= PID(refAngle, angleDeg);
+          float u_pos= PID(refAngle, angleBound);
 
             if(u_pos >= 0){
               dir=1; //forward
@@ -289,10 +301,25 @@ void loop() {
           //set power of motors based on outputs
           //pwra = (int)u_pos;
           //pwrb = (int)u_velb;
-          pwra=constrain(abs(u_pos),0,1);
+          pwra=constrain(u_pos,-10,10);
+          //Serial.println(u_pos);
+          
+
+          
           setMotor(pwra,dir,pwrb,dir);
+          //setMotor(40,1,40,1);
 
           prev=cur; //update sampling time chunk
+          //for plotter
+          //Serial.print(deltatime);
+          //Serial.print(",");
+          //Serial.print(angleDeg);
+          //Serial.print(",");
+          //Serial.print(outputAngle);
+          //Serial.print(",");
+          //Serial.print(encoderDifference);
+
+
         }
         t++; // counter for control iterations instead of time (unnecessary?)
       }
@@ -310,10 +337,11 @@ void loop() {
     }
   }
 
-  delay(100);  // slight delay for readability
+  delay(50);  // slight delay for readability
 }
 
-float PID(float setpoint, float input){ //setpoint=degrees, input=degrees
+float PID(float setpoint, float input){ 
+  //setpoint=degrees, input=degrees, motor rated max 330 rpm, 5.5 rev/s or 1980 deg/sec
   //gets actual delta time between each dt sampling (maybe redundant?)
   currentTime=millis();
   float elapsedTime=(currentTime-previousTime)/1000.0; //convert to seconds
@@ -324,7 +352,7 @@ float PID(float setpoint, float input){ //setpoint=degrees, input=degrees
   totalError += error*elapsedTime;
   float instError = (error-previousError)/elapsedTime;
 
-  //PID calculation
+  //PID calculation 
   float output=Kp* error + Ki* totalError + Kd * instError;
   //convert output from radians to rad/s
   //float velocitySetpoint=output/(elapsedTime);
