@@ -32,6 +32,7 @@ AS5047P as5047p(10);
 //buttons
 #define ON_BUTTON 7
 #define OFF_BUTTON 8
+#define RESET_BUTTON 6
 
 struct DataFrame {
   unsigned long time;
@@ -58,6 +59,8 @@ int CPR = 28;     //Counts per rotation of relative magnetic encoder
 //button and timing variables
 int buttonStatus = 1;
 int buttonStop = 1;
+int buttonReset = 1;
+bool resetFlag = false; //flag for when the reset button is has been hit
 bool buttonTriggered = false; //flag for if start hit
 uint32_t startTime = 0;
 bool motorsOn = false; //flag for when the motors started
@@ -101,9 +104,9 @@ PID_control ctrl(kpa, kia, kda, 0, 170, sigma, dt/1e6);
 PID_control ctrlb(kpb, kib, kdb, 0, 170, sigma, dt/1e6);
 
 //LARGE control constants
-double Kp=15; 
+double Kp=1.8; 
 double Ki=0;
-double Kd=0;
+double Kd=.05;
 
 float totalError=0;
 float previousError=0;
@@ -150,6 +153,7 @@ void setup() {
   //buttons
   pinMode(ON_BUTTON, INPUT_PULLUP);  //on green wire (right)
   pinMode(OFF_BUTTON, INPUT_PULLUP);  //off orange wire (left)
+  pinMode(RESET_BUTTON, INPUT_PULLUP);
 
   //LEDS
   pinMode(GREEN_LED, OUTPUT);
@@ -166,6 +170,25 @@ void setup() {
 void loop() {
   int startValue = digitalRead(ON_BUTTON); //last reading of the button, high(1) or low(0)
   int stopValue = digitalRead(OFF_BUTTON); //starts high pulled to gnd
+  int resetValue = digitalRead(RESET_BUTTON); //for moving back to 0
+  // SPI encoder angle
+  uint16_t angle = as5047p.readAngleRaw();
+  float angleDeg = angle * 360.0 / 16384.0;
+  float angleRad = angle * 2 * 3.14159265358979 / 16384.0;
+  float angleBound=angleDeg-180;
+  float angleRadBound=angleRad-3.14159265358979;
+
+
+  //Quadrature built in encoder
+  inputAngle = 360.0 * (count) / CPR;
+  outputAngle = inputAngle / N;
+  outputAngle = fmod(outputAngle, 360.0);
+
+  inputAngle2 = 360.0 * (count2) / CPR;
+  outputAngle2 = inputAngle2 / N;
+  outputAngle2 = fmod(outputAngle2, 360.0);
+
+  float encoderDifference=angleDeg-outputAngle;
 
   // START BUTTON (and red light to show waiting)
   if (buttonStatus != startValue) { //check if change from last reading
@@ -190,27 +213,46 @@ void loop() {
       t = 100000; //raise counter to break loops
       reset();
       return;  // exit early to prevent motor
+      buttonStop=false;
     }
   }
 
-  // SPI encoder angle
-  uint16_t angle = as5047p.readAngleRaw();
-  float angleDeg = angle * 360.0 / 16384.0;
-  float angleRad = angle * 2 * 3.14159265358979 / 16384.0;
-  float angleBound=angleDeg-180;
-  float angleRadBound=angleRad-3.14159265358979;
+  //RESET BUTTON
+  if (buttonReset != resetValue) { //if the reset button gets pressed
+    buttonReset = resetValue;
+    if (buttonReset == 0){
+      resetFlag=true;
+    }
+  }
+  if (resetFlag){
+      int dir;
+      int pwra;
+      float target=0;
+      //3.14159265358979;
+      float delta_x = target - angleRad; //error checking constantly how far it is from goal
+      if (abs(delta_x) < .01) {
+        setMotor(0,0,0,0); //if its within abt 5 deg turn off the motors
+        resetFlag=false;
+      }
+      else{
+      float u_pos=PID(target, angleRad); //use PID function to move position back to 0
+      //direction control
+      if(u_pos >= 0){
+          dir=1; //forward
+          pwra=(int)u_pos;
+          }
+      else{
+          dir=0;
+          pwra=(int)(-u_pos);
+          }
+      pwra=constrain(pwra,0,170); //limit so it doesnt blow motors
+      setMotor(pwra,dir,pwrb,dir);
 
-
-  //Quadrature built in encoder
-  inputAngle = 360.0 * (count) / CPR;
-  outputAngle = inputAngle / N;
-  outputAngle = fmod(outputAngle, 360.0);
-
-  inputAngle2 = 360.0 * (count2) / CPR;
-  outputAngle2 = inputAngle2 / N;
-  outputAngle2 = fmod(outputAngle2, 360.0);
-
-  float encoderDifference=angleDeg-outputAngle;
+      Serial.println(delta_x);
+      Serial.print(angleRad);
+      }
+  }
+  
 
 
 //for print
@@ -274,13 +316,15 @@ void loop() {
       lightsOn = true;
     }
 
-    //analysis and control stuffs DEGREES FOR NOW
+    //analysis and control stuffs [radians]
     if (lightsOn) {
       if(deltatime>=0 && deltatime < 10000000){ //run until 10 seconds max
         cur=micros();
         //data taken at each dt
         if((cur-prev)>= dt)
         { 
+          float goal = 60; //angle setpoint for tuning in degrees
+          float tuning= goal*2*3.14159265358979/360;
           int dir;
           int pwra;
           positionControl = true;
@@ -290,7 +334,8 @@ void loop() {
           
           //Serial.print("DATA HIT THIS POINT INSIDE THE LOOP");
           //angular position control that outputs a desired velocity for inner loop to match
-          float u_pos= PID(refAngle, angleRadBound);
+          float u_pos= PID(tuning, angleRadBound);
+          //PID(refAngle, angleRadBound);
 
             if(u_pos >= 0){
               dir=1; //forward
@@ -307,7 +352,7 @@ void loop() {
           //set power of motors based on outputs
           //pwra = (int)u_pos;
           //pwrb = (int)u_velb;
-          pwra=constrain(u_pos,0,170);
+          pwra=constrain(pwra,0,170);
           //Serial.println(u_pos);
           
 
@@ -325,8 +370,6 @@ void loop() {
           //Serial.print(outputAngle);
           //Serial.print(",");
           //Serial.println(encoderDifference);
-
-
         }
         t++; // counter for control iterations instead of time (unnecessary?)
       }
@@ -347,6 +390,7 @@ void loop() {
   //delay(50);  // slight delay for readability
 }
 
+//main control loop
 float PID(float setpoint, float input){ 
   //setpoint=degrees, input=degrees, motor rated max 330 rpm, 5.5 rev/s or 1980 deg/sec
   //gets actual delta time between each dt sampling (maybe redundant?)
@@ -369,6 +413,7 @@ float PID(float setpoint, float input){
   return output;
 }
 
+//function to dedicate motorpower easily with both forward and backward
 void setMotor(int pwma, int dira, int pwmb, int dirb) {
   if (dira) { // forward
     digitalWrite(AIN1, HIGH);
@@ -389,7 +434,7 @@ void setMotor(int pwma, int dira, int pwmb, int dirb) {
   analogWrite(PWMB, pwmb);
 }
 
-
+//function to run when stop button pressed to reset all the lights and flags
 void reset() {
   //turn off whole circuit
   digitalWrite(RED_LED, LOW);
@@ -405,6 +450,7 @@ void reset() {
 }
 
 
+//ABI encoder edge readings (delete if switch to SPI)
 void chanA_ISR() {
   int a = digitalRead(ENC_CHANA);
   int b = digitalRead(ENC_CHANB);
