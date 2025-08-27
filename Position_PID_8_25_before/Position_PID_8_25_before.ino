@@ -72,7 +72,7 @@ bool green = false;
 bool lightsOn =false; //flag for when the position PID should run
 
 //motor power setup
-float frequency = 3; //input for position control reference angle
+float frequency = 7; //input for position control reference angle
 float amplitude = 3.1415926535/2;
 //90; //sin wave amplitude, bounds of motion (-60 to 60)
 
@@ -101,9 +101,9 @@ PID_control ctrl(kpa, kia, kda, 0, 170, sigma, dt/1e6);
 PID_control ctrlb(kpb, kib, kdb, 0, 170, sigma, dt/1e6);
 
 //LARGE control constants
-double Kp=9; 
-double Ki=1;
-double Kd=1;
+double Kp=15; 
+double Ki=0;
+double Kd=0;
 
 float totalError=0;
 float previousError=0;
@@ -174,7 +174,7 @@ void loop() {
     if (buttonStatus == 0) { 
       reset();  //clean up for fresh start
       buttonTriggered = true;
-      startTime = millis();  //timer starts right at button press
+      startTime = micros();  //timer starts right at button press
       motorsOn = false; //make sure motors are off 
       t = -1; 
       lastAngle = as5047p.readAngleRaw();  // capture baseline
@@ -242,7 +242,7 @@ void loop() {
   //Serial.println(outputAngle2);
 
   if (buttonTriggered) {
-    deltatime = millis() - startTime; //time elapsed since start
+    deltatime = micros() - startTime; //time elapsed since start
     
 
     // RED LED ON at timer start
@@ -276,7 +276,7 @@ void loop() {
 
     //analysis and control stuffs DEGREES FOR NOW
     if (lightsOn) {
-      if(deltatime>=0 && deltatime < 10000){ //run until 10 seconds max
+      if(deltatime>=0 && deltatime < 10000000){ //run until 10 seconds max
         cur=micros();
         //data taken at each dt
         if((cur-prev)>= dt)
@@ -284,9 +284,10 @@ void loop() {
           int dir;
           int pwra;
           positionControl = true;
-          unsigned long now=deltatime-1000;
-          float ref= sin(2*3.14159265359*frequency*((now/1000.0))); //reference position outputs value btwn -1 and 1
-          float refAngle= amplitude*ref; //converts proportion to degrees
+          //unsigned long now=deltatime-1000;
+          float ref= sin(2*3.14159265359*frequency*cur/10000000); //reference position outputs value btwn -1 and 1
+          float refAngle= amplitude*ref; //converts proportion to degree
+          
           //Serial.print("DATA HIT THIS POINT INSIDE THE LOOP");
           //angular position control that outputs a desired velocity for inner loop to match
           float u_pos= PID(refAngle, angleRadBound);
@@ -306,19 +307,19 @@ void loop() {
           //set power of motors based on outputs
           //pwra = (int)u_pos;
           //pwrb = (int)u_velb;
-          pwra=constrain(u_pos,0,10);
+          pwra=constrain(u_pos,0,170);
           //Serial.println(u_pos);
           
 
           
           setMotor(pwra,dir,pwrb,dir);
-          //setMotor(40,1,40,1);
+          //setMotor(100,1,100,1);
 
           prev=cur; //update sampling time chunk
           //for plotter
-          //Serial.print(deltatime);
+          Serial.print(deltatime);
           //Serial.print(now);
-          //Serial.print(",");
+          Serial.print(",");
           Serial.println(angleDeg);
           //Serial.print(",");
           //Serial.print(outputAngle);
