@@ -3,16 +3,9 @@
 #include <Encoder.h>
 #include <rcc.h>
 
-// breakout board with SPI
-AS5047P as5047p(10);
-
-// left built-in encoder
-#define ENC_CHANA 20
-#define ENC_CHANB 21
-
-// right built-in encoder
-#define ENC_CHANC 22
-#define ENC_CHAND 23
+// breakout board with SPI [labels are on the bottom]
+AS5047P as5047p(10);        //right
+AS5047P as5047pb(9);         //left
 
 // motor L (left)
 #define AIN1 17
@@ -45,16 +38,6 @@ struct DataFrame {
   double uffB;
 };
 
-//(LARGE MOTORS) built in encoder variables (eventually remove)
-volatile int count = 0;   //LEFT
-double inputAngle = 0;    //input gearbox shaft angle (motor shaft angle)
-double outputAngle = 0;   //output gearbox shaft angle
-volatile int count2 = 0;  //RIGHT
-double inputAngle2 = 0;
-double outputAngle2 = 0;
-double N = 31.5;  //gear ratio
-int CPR = 28;     //counts of relative magnetic encoder per rotation of output shaft
-
 //BUTTONS, related timing variables & flags
 int buttonStatus = 1;
 int buttonStop = 1;
@@ -80,36 +63,47 @@ float theta_last;                        //to store the initial value for each i
 float omega_last = (360.0 * frequency);  //set to a constant value for now, change if add acceleration
 
 float amplitude = 3.1415926535 / 2;  //90 deg sin wave amplitude, bounds of motion
-int dir;                             //directionality (1=forward, 0=backward)
+int dira;                             //directionality (1=forward, 0=backward)
+int dirb;
 float u_pos;                           //PID error
+float u_posb;
 int goal;                            //storage for variable position control calls
-int angle;
+float angle;
+float angleb;
 float tuning;
 float angleRad;
+float angleRadb;
 float angleRadBound;
+float angleRadBoundb;
 float ref;
 float angleDeg;
+float angleDegb;
 float angleBound;
+float angleBoundb;
 float pwra = 100;  //variables to power the motors
 float pwrb = 100;
 unsigned long cur, prev;  //timing for data analysis & PID timing
 double derivative;        //variable to hold the calculation for velocity control (for later but super necessary)
-double derivativeB;
+double derivativeb;
 
 //PID CONSTANTS---------------------------------------------------------------------------------------------------------------------------------------------------
 // VELOCITY constants and mike's library (velocity PID outputting motor power)
-double kpa = 10;
-double kia = 0;
-double kda = 0;
+double kpa = 10; //left
+double kia = 0.25;
+double kda = 0.0025;
 
-double kpb = 0.25;
-double kib = 0.1;
-double kdb = 0;
+double kpb = 5; //right
+double kib = 0.01;
+double kdb = 0.001;
 
 // POSITION control constants (for my function that takes position and outputs velocity)
-double Kp = 4;
-double Ki = 0;  //0.02
-double Kd = 0.00;
+double Kpa = 2;
+double Kia = 0.;  //0.02
+double Kda = 0.00;
+
+double Kpb = 2;
+double Kib = 0.;  //0.02
+double Kdb = 0.00;
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //mike's library setup
 float sigma = 0.05;
@@ -120,13 +114,15 @@ Differentiator diff(sigma, dt);
 Differentiator diffb(sigma, dt);
 
 //timing and errors in the PID function I made
+float pos_setpoint;
 float totalError = 0;           //holds total past error for integral term
+float totalErrorb = 0;
 float previousError = 0;        //holds onto the prior error value to use in derivative term calculation
+float previousErrorb = 0;
 unsigned long currentTime = 0;  //used in calculating the actual time period of the control for
 unsigned long previousTime = 0;
+unsigned long previousTimeb = 0;
 unsigned long loop_timer = 0;  // to know how long the PID has been going (after 1 sec do square wave)
-
-float theta_actual = 1.0;
 
 void setup() {
   prev = micros();  //give dt a starting value (this gets updated later too)
@@ -142,16 +138,6 @@ void setup() {
   pinMode(BIN1, OUTPUT);
   pinMode(BIN2, OUTPUT);
   pinMode(PWMB, OUTPUT);
-  //left built in encoder
-  pinMode(ENC_CHANA, INPUT_PULLUP);
-  pinMode(ENC_CHANB, INPUT_PULLUP);
-  attachInterrupt(ENC_CHANA, chanA_ISR, CHANGE);
-  attachInterrupt(ENC_CHANB, chanB_ISR, CHANGE);
-  //right built in encoder
-  pinMode(ENC_CHANC, INPUT_PULLUP);
-  pinMode(ENC_CHAND, INPUT_PULLUP);
-  attachInterrupt(ENC_CHANC, chanC_ISR, CHANGE);
-  attachInterrupt(ENC_CHAND, chanD_ISR, CHANGE);
   //buttons
   pinMode(ON_BUTTON, INPUT_PULLUP);     //on green wire
   pinMode(OFF_BUTTON, INPUT_PULLUP);    //off orange wire
@@ -167,6 +153,7 @@ void setup() {
   //encoder
   SPI.begin();  //for initializing AS5047 magnetic encoder chip
   as5047p.initSPI();
+  as5047pb.initSPI();
 }
 
 void loop() {
@@ -179,21 +166,28 @@ void loop() {
                                                        //if it's been less than 1 second
       // float theta = -90;                                           //theta_last + (omega_last*dt);    //main angular position setpoint [degrees]
       // float omega = omega_last;                                     //constant for now, change this later
-      setAngle();                                                   //pull the current angle and do all the conversions for the current actual and setpoint angles
+      pullAngle();                                                   //pull the current angle and do all the conversions for the current actual and setpoint angles
+      pos_setpoint=60;
       // float bound_theta = fmod(theta, 360.0);                       //wrap into a circle
-      u_pos = ctrl.pid(theta_actual, angleRad);                           //amount of velocity needed to travel desired distance
-      float vel_setpoint = u_pos;                                         //+omega for trajectory                    //total error with feedforward trajectory, or anticipated velocity at that point in time with adjustment
+      u_pos = PIDa(pos_setpoint, angleBound);                           //amount of velocity needed to travel desired distance
+      u_posb = PIDb(pos_setpoint, angleBoundb);
+      float vel_setpoint = u_pos;  //+omega for trajectory          //total error with feedforward trajectory, or anticipated velocity at that point in time with adjustment
+      float vel_setpointb = u_posb; 
       derivative = diff.differentiate(angleRad);             //converts measured position to current speed [rev/s]*360=[deg/s]
+      derivativeb = diff.differentiate(angleRadb);
       float vel_setpoint_rads = vel_setpoint * 2 * 3.14159265358979 / 360.;  //converts deg to rad
-      float u_vel = ctrlb.pid(vel_setpoint, derivative);            //outputs motor pwr proportion [deg/s]
+      float vel_setpoint_radsb= vel_setpointb* 2 * 3.14159265358979 / 360.;
+      float u_vel = ctrl.pid(vel_setpoint_rads, derivative);            //outputs motor pwr proportion [deg/s]
+      float u_velb = ctrlb.pid(vel_setpoint_radsb, derivativeb);
       setPower(-1*u_vel);                                              //apply direction, constrain, and set the motor power based on the control input
-      setMotor(pwra, dir, pwrb, dir);                               //use the error proportion to set the motor voltage
+      setPowerb(-1*u_velb);
+      setMotors(0, dira, pwrb, dirb);                               //use the error proportion to set the motor voltage
       // positionControl = true;                                       //green light shows when controls are active
       // theta_last = theta;
       // omega_last = omega;
       Serial.print(cur-prev);
       Serial.print(";");
-      Serial.print(theta_actual);
+      Serial.print(pos_setpoint);
       Serial.print(',');
       Serial.print(angle);
       Serial.print(',');
@@ -208,14 +202,11 @@ void loop() {
       prev = cur;
     }
 
-    // positionControl = false;  //reset the flag so that the green light flashing indicates it entering or exiting a control loop
-    
+    // positionControl = false;  //reset the flag so that the green light flashing indicates it entering or exiting a control loop 
   }
 
-
-
   //MAIN CONTROL LOOP-----------------------------------------------------------------------------------------------------------------------------------
-  float PID(float setpoint, float input) {                         //setpoint=degrees, input=degrees, motor rated max 330 rpm, 5.5 rev/s or 1980 deg/sec
+  float PIDa(float setpoint, float input) {                         //setpoint=degrees, input=degrees, motor rated max 330 rpm, 5.5 rev/s or 1980 deg/sec
     currentTime = micros();                                        //gets actual delta time between each dt sampling (maybe redundant?)
     float elapsedTime = (currentTime - previousTime) / 1000000.0;  //find the time that's passed since the last control iteration and then convert to seconds
     //if(elapsedTime<=0) elapsedTime=0.001f; //prevent divide by 0 error
@@ -226,22 +217,46 @@ void loop() {
     float instError = (error - previousError) / elapsedTime;  //using the current and last points find instantaneous slope
 
     //PID calculation
-    float output = (Kp * error) + (Ki * totalError) + (Kd * instError);
+    float output = (Kpa * error) + (Kia * totalError) + (Kda * instError);
 
     previousError = error;  //update to hold the values from this loop before next time thru
     previousTime = currentTime;
     return output;  //set u_pos to output, or proportion of motor power to correct
   }
+  float PIDb(float setpoint, float input) {                         //setpoint=degrees, input=degrees, motor rated max 330 rpm, 5.5 rev/s or 1980 deg/sec
+    currentTime = micros();                                        //gets actual delta time between each dt sampling (maybe redundant?)
+    float elapsedTime = (currentTime - previousTimeb) / 1000000.0;  //find the time that's passed since the last control iteration and then convert to seconds
+    //if(elapsedTime<=0) elapsedTime=0.001f; //prevent divide by 0 error
+
+    //euler's approx for integrals & derivatives
+    float error = setpoint - input;                           //subtract the two values fed into the function (setpoint=goal, input=sensor read)
+    totalErrorb += error * elapsedTime;                        //add onto the counter for integral calculation
+    float instError = (error - previousErrorb) / elapsedTime;  //using the current and last points find instantaneous slope
+
+    //PID calculation
+    float output = (Kpb * error) + (Kib * totalError) + (Kdb * instError);
+
+    previousErrorb = error;  //update to hold the values from this loop before next time thru
+    previousTimeb = currentTime;
+    return output;  //set u_pos to output, or proportion of motor power to correct
+  }
 
   //function to refresh & change all the variables for each iteration of the control easily
-  void setAngle() {
+  void pullAngle() {
     // SPI encoder chip read
     uint16_t angle = as5047p.readAngleRaw();  //pull the sensor angle data
+    uint16_t angleb = as5047pb.readAngleRaw();
 
     angleDeg = angle * 360.0 / 16384.0;  //sensor read angle conversions
     angleRad = angle * 2 * 3.14159265358979 / 16384.0;
     angleBound = angleDeg - 180;                  //bounded -180 to 180 to have + and - for control motion
     angleRadBound = angleRad - 3.14159265358979;  //bounding converted to radians
+
+    angleDegb = angleb * 360.0 / 16384.0;  //sensor read angle conversions
+    angleRadb = angleb * 2 * 3.14159265358979 / 16384.0;
+    angleBoundb = angleDegb - 180;                  //bounded -180 to 180 to have + and - for control motion
+    angleRadBoundb = angleRadb - 3.14159265358979;  //bounding converted to radians
+
 
     tuning = goal * 2 * 3.14159265358979 / 360;  //converts deg to rad
     ref = fmod((360.0 * cur / 1000000.0), 360);  //constantly increasing circle?
@@ -252,10 +267,10 @@ void loop() {
   //POWER SET & DIRECTION CONTROL
   int setPower(float u) {
     if (u >= 0) {
-      dir = 1;  //if error is positive, set direction forward
+      dira = 1;  //if error is positive, set direction forward
       pwra = abs(u);
     } else {  //if error is negative, set direction backward
-      dir = 0;
+      dira = 0;
       pwra = abs(u);
     }
 
@@ -263,8 +278,21 @@ void loop() {
     return int(pwra);
   }
 
+    int setPowerb(float u) {
+    if (u >= 0) {
+      dirb = 1;  //if error is positive, set direction forward
+      pwrb = abs(u);
+    } else {  //if error is negative, set direction backward
+      dirb = 0;
+      pwrb = abs(u);
+    }
+
+    pwrb = constrain(pwrb, 0, 250);  //limit so it doesnt blow motors
+    return int(pwrb);
+  }
+
   //MOTOR function to dedicate power easily with forward and backward
-  void setMotor(int pwma, int dira, int pwmb, int dirb) {
+  void setMotors(int pwma, int dira, int pwmb, int dirb) {
     if (dira) {  // forward
       digitalWrite(AIN1, HIGH);
       digitalWrite(AIN2, LOW);
@@ -298,46 +326,4 @@ void loop() {
     quickRun = false;
     buttonTriggered = false;
     totalError = 0;  //reset counter to zero for a fresh control
-  }
-
-
-  //ABI encoder edge readings (delete if switch to SPI)
-  void chanA_ISR() {
-    int a = digitalRead(ENC_CHANA);
-    int b = digitalRead(ENC_CHANB);
-    if ((a && b) || (!a && !b)) {
-      count++;
-    } else if ((!a && b) || (a && !b)) {
-      count--;
-    }
-  }
-
-  void chanB_ISR() {
-    int a = digitalRead(ENC_CHANA);
-    int b = digitalRead(ENC_CHANB);
-    if ((!a && b) || (a && !b)) {
-      count++;
-    } else if ((a && b) || (!a && !b)) {
-      count--;
-    }
-  }
-
-  void chanC_ISR() {
-    int a = digitalRead(ENC_CHANC);
-    int b = digitalRead(ENC_CHAND);
-    if ((a && b) || (!a && !b)) {
-      count2++;
-    } else {
-      count2--;
-    }
-  }
-
-  void chanD_ISR() {
-    int a = digitalRead(ENC_CHANC);
-    int b = digitalRead(ENC_CHAND);
-    if ((!a && b) || (a && !b)) {
-      count2++;
-    } else {
-      count2--;
-    }
   }
